@@ -1,0 +1,10 @@
+{
+  "name": "sky-plane",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A portable single-player airport business and flight simulation game.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test core.test.js worlds.test.js race.test.js"
+  }
+}

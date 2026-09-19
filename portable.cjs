@@ -1,0 +1,36 @@
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const {pathToFileURL}=require('node:url');
+const C=require('./core');
+(async()=>{
+  const browser=await chromium.launch({headless:true,channel:process.env.SKYPLANE_BROWSER||'msedge',args:['--disable-gpu']});
+  const page=await browser.newPage({viewport:{width:1280,height:800}}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(pathToFileURL(path.resolve(__dirname,'./index.html')).href);
+  await page.click('[data-action="new-world"]');await page.fill('#new-world-name','Portable Airport');await page.click('#create-world-form button[type="submit"]');await page.click('[data-page="overview"].nav-item');
+  await page.waitForSelector('#airport-canvas');await page.waitForTimeout(150);
+  assert.equal(await page.locator('h1').textContent(),'A little airport. Big plans.');
+  await page.click('[data-page="settings"].nav-item');
+  await page.setInputFiles('#save-import',{name:'bad-save.json',mimeType:'application/json',buffer:Buffer.from('{"version":99}')});
+  await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('not a valid'));
+  assert.equal(await page.evaluate(()=>SkyPlane.snapshot().state.buildings.terminal),0);
+  const imported=C.freshState();imported.buildings.terminal=2;imported.staff.cabin=2;imported.cash=18400;
+  await page.setInputFiles('#save-import',{name:'good-save.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(imported))});
+  await page.click('#confirm-import');
+  assert.equal(await page.evaluate(()=>SkyPlane.snapshot().state.buildings.terminal),2);
+  assert.equal(await page.evaluate(()=>SkyPlane.snapshot().state.staff.cabin),2);
+  await page.click('[data-page="settings"].nav-item');
+  const downloadPromise=page.waitForEvent('download');await page.click('[data-action="export"]');const file=await downloadPromise;
+  assert.equal(file.suggestedFilename(),'skyplane-airport-save.json');
+  await page.click('[data-action="reset"]');await page.click('[data-action="close-modal"]');assert.equal(await page.evaluate(()=>SkyPlane.snapshot().state.buildings.terminal),2);
+  await page.click('[data-action="reset"]');await page.fill('#new-world-name','Another Airport');await page.click('#create-world-form button[type="submit"]');assert.equal(await page.evaluate(()=>SkyPlane.snapshot().state.buildings.terminal),0);assert.equal(await page.evaluate(()=>SkyPlane.snapshot().library.worlds.length),3);
+  const timing=await page.evaluate(()=>{
+    const canvas=document.createElement('canvas');canvas.style.cssText='width:900px;height:500px;position:fixed;left:-9999px';document.body.append(canvas);
+    const r=new SkyWorld.Renderer(canvas),s=SkyCore.freshState(),f=SkyCore.newFlight('training',s);f.y=130;f.z=-700;
+    r.render(s,f);const start=performance.now();for(let i=0;i<30;i++)r.render(s,f);const average=(performance.now()-start)/30;canvas.remove();return Math.round(average*100)/100;
+  });
+  assert.deepEqual(errors,[]);
+  console.log(`PASS: direct-file launch, invalid save protection, import confirmation, export download, reset cancellation, fresh start. Low-graphics render benchmark: ${timing} ms/frame on this machine (not a school-device guarantee).`);
+  await browser.close();
+})().catch(e=>{console.error(e);process.exit(1);});
